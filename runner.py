@@ -167,7 +167,7 @@ Q_table = [[0.0 for _ in range(NUM_ACTIONS)] for _ in range(NUM_STATES)]
 # Hyperparameters
 alpha = 0.45    # Learning rate
 gamma = 0.9     # Discount factor
-epsilon = 0.35  # Exploration rate 0.12 to learn, 0 to exploit
+epsilon = 0.12  # Exploration rate 0.12 to learn, 0 to exploit
 
 
 def get_reward(prev_state, action, next_state):
