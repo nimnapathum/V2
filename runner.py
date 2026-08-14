@@ -30,7 +30,7 @@ color_sensor.mode = 'COL-REFLECT'
 
 # Set default motor speeds for smooth control and sharp corner turns
 BASE_SPEED = 16
-Q_FILE = "edge_q_table.json"
+Q_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "edge_q_table.json")
 
 # ==========================================
 # 2. Sensor Reading Functions (For States)
@@ -165,9 +165,9 @@ STATE_NAMES = {0: "Outside (Black)", 1: "On Edge (Target)", 2: "Inside (White Li
 Q_table = [[0.0 for _ in range(NUM_ACTIONS)] for _ in range(NUM_STATES)]
 
 # Hyperparameters
-alpha = 0.45    # Learning rate
+alpha = 0.0     # Learning rate. 0 = frozen table (exploit mode), 0.45 to train
 gamma = 0.9     # Discount factor
-epsilon = 0.35  # Exploration rate 0.12 to learn, 0 to exploit
+epsilon = 0.0   # Exploration rate 0.12 to learn, 0 to exploit
 
 
 def get_reward(prev_state, action, next_state):
@@ -224,15 +224,29 @@ def save_q_table():
         print("Failed to save Q-table: {}".format(e))
 
 def load_q_table():
-    """Loads pre-trained Q-table if available."""
+    """Loads pre-trained Q-table. Returns True only if a usable table was read."""
     global Q_table
-    if os.path.exists(Q_FILE):
-        try:
-            with open(Q_FILE, 'r') as f:
-                Q_table = json.load(f)
-            print("Loaded pre-trained Q-table from {}".format(Q_FILE))
-        except Exception as e:
-            print("Could not load Q-table: {}".format(e))
+    if not os.path.exists(Q_FILE):
+        print("Q-table not found at {}".format(Q_FILE))
+        return False
+    try:
+        with open(Q_FILE, 'r') as f:
+            loaded = json.load(f)
+    except Exception as e:
+        print("Could not load Q-table: {}".format(e))
+        return False
+
+    # An all-zero or wrong-shaped table would make every state pick Forward
+    if len(loaded) != NUM_STATES or any(len(row) != NUM_ACTIONS for row in loaded):
+        print("Q-table has wrong shape (expected {}x{})".format(NUM_STATES, NUM_ACTIONS))
+        return False
+    if all(v == 0 for row in loaded for v in row):
+        print("Q-table is all zeros - untrained")
+        return False
+
+    Q_table = loaded
+    print("Loaded pre-trained Q-table from {}".format(Q_FILE))
+    return True
 
 # ==========================================
 # 6. Main Loop Execution
@@ -246,9 +260,12 @@ if __name__ == '__main__':
         print("   EV3 Q-Learning Edge Follower Starting  ")
         print("==========================================")
         
-        load_q_table()
+        if not load_q_table():
+            print("[ABORT] No usable Q-table - refusing to move in exploit mode.")
+            running_flag = False
+
         current_state = get_current_state()
-        
+
         step_count = 0
         while running_flag:
             # 0. Check for manual EV3 Middle Button (Enter) press to stop
@@ -298,8 +315,8 @@ if __name__ == '__main__':
     finally:
         print("\nStopping robot...")
         stop_motors()
-        save_q_table()
-        
+        # save_q_table()  # disabled in exploit mode - do not overwrite the tuned table
+
         print("\nFinal Learned Q-Table:")
         print("{:<20} {:<10} {:<10} {:<10} {:<10}".format("State", "Forward", "Left", "Right", "Reverse"))
         for s in range(NUM_STATES):
