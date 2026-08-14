@@ -30,6 +30,12 @@ color_sensor.mode = 'COL-REFLECT'
 
 # Set default motor speeds for smooth control and sharp corner turns
 BASE_SPEED = 16
+# Inner-wheel speed during a turn. At -BASE_SPEED the wheels counter-rotate, so a
+# turn is pure rotation with no forward creep - the robot holds its ground and
+# sweeps the sensor until it finds the edge. This is what lets a 90-degree corner
+# be taken by repeatedly applying the same turn action.
+# Raise toward -8 to add slow forward creep during turns if it ever stalls.
+TURN_SPEED = BASE_SPEED
 Q_FILE = "edge_q_table.json"
 
 # ==========================================
@@ -78,14 +84,14 @@ def execute_action(action_id):
         right_motor.on(SpeedPercent(BASE_SPEED))
         
     elif action_id == 1:
-        # Left Pivot Turn (Inner wheel slows down to turn left)
-        left_motor.on(SpeedPercent(-5))
+        # Left Pivot Turn (counter-rotation: rotates in place, no forward creep)
+        left_motor.on(SpeedPercent(-TURN_SPEED))
         right_motor.on(SpeedPercent(BASE_SPEED))
-        
+
     elif action_id == 2:
-        # Right Pivot Turn (Inner wheel slows down to turn right)
+        # Right Pivot Turn (counter-rotation: rotates in place, no forward creep)
         left_motor.on(SpeedPercent(BASE_SPEED))
-        right_motor.on(SpeedPercent(-5))
+        right_motor.on(SpeedPercent(-TURN_SPEED))
         
     elif action_id == 3:
         # Reverse
@@ -173,25 +179,33 @@ epsilon = 0.12  # Exploration rate 0.12 to learn, 0 to exploit
 def get_reward(prev_state, action, next_state):
     """
     Edge-Following Reward logic (White Line on Black Background):
-    - State 1 (On Edge): Target zone! Forward (+10) is strongly favored. Corrective turns landing on edge (+8). Reverse (-5).
-    - State 0 (Outside on Black Mat): Continuing forward (-10). Drifting off edge onto black (-8). Turning Right (Action 2) towards line edge (+7).
-    - State 2 (Inside White Line): Drifting inside white line (-2). Turning Left (Action 1) towards edge (+7).
+    - State 1 (On Edge): Target zone! Forward (+10) is strongly favored. A turn that
+      RECOVERS the edge from off-line scores +8, but a turn taken while ALREADY on
+      the edge scores only +2 - otherwise wobbling in place pays nearly as well as
+      driving straight, and the policy learns to pivot forever instead of advancing.
+    - State 0 (Outside on Black Mat): Continuing forward (-10). Turning Right (+7).
+    - State 2 (Inside White Line): Turning Left (Action 1) towards edge (+7).
+    - Leaving the edge is penalised by INTENT: drifting off while going straight is
+      a mild -3, but steering off deliberately is -8. The old code did the reverse
+      (-10 for drifting off, -2 for steering off), which taxed the one action we
+      most want and made turning on the edge the profitable choice.
     """
     # Target state: Reached or stayed on edge (State 1)
     if next_state == 1:
         if action == 0:
             return 10    # Max reward for going straight along the edge
         elif action in (1, 2):
-            return 8     # High reward for corrective turn landing back on edge
+            # Recovering the edge is valuable; wobbling on it is not.
+            return 2 if prev_state == 1 else 8
         else:
             return -5    # Reverse on edge
-            
+
     # Outside on black mat (State 0)
     elif next_state == 0:
-        if action == 0:
+        if prev_state == 1:
+            return -3 if action == 0 else -8   # drifted off vs steered off
+        elif action == 0:
             return -10   # Heavy penalty for continuing forward when lost on black mat!
-        elif prev_state == 1:
-            return -8    # Drifting off edge onto black background
         elif action == 2:
             return 7     # Turning Right from black mat towards line edge
         else:
@@ -200,11 +214,11 @@ def get_reward(prev_state, action, next_state):
     # Inside white line (State 2)
     else:
         if prev_state == 1:
-            return -2    # Drifting off edge into center of white line
+            return -3 if action == 0 else -8   # drifted off vs steered off
         elif action == 1:
             return 7     # Turning Left from white line towards edge
         else:
-            return 1
+            return -3    # Driving deeper into the tape is never useful
 
 def select_action(state):
     """Epsilon-greedy action selection."""
@@ -267,8 +281,10 @@ if __name__ == '__main__':
             chosen_action = select_action(current_state)
             execute_action(chosen_action)
             
-            # Action execution duration
-            sleep(0.12) 
+            # Action execution duration. At 0.12s a single turn swept the sensor
+            # ~1.2cm - wider than the tape, so corrections overshot the edge and
+            # the robot hunted. 0.05s gives ~0.5cm per step: sub-tape resolution.
+            sleep(0.05)
             
             # Observe environment transition
             next_state = get_current_state()
