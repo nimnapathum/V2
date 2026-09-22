@@ -19,7 +19,7 @@ btn = Button()
 color_sensor.mode = 'COL-REFLECT'
 
 # ---------------- Calibration / motion ----------------
-BASE_SPEED = 16
+BASE_SPEED = 20
 TURN_SPEED = 16
 ACTION_TIME = 0.06
 BLACK_MAX = 6       # CALIBRATE for your track
@@ -35,11 +35,11 @@ STATE_NAMES = {0: 'Black', 1: 'Edge', 2: 'White'}
 
 ALPHA = 0.45
 GAMMA = 0.90
-START_EPSILON = 0.35
+START_EPSILON = 0.0
 MIN_EPSILON = 0.05
 EPSILON_DECAY = 0.88
-EPISODES = 15
-MAX_STEPS = 300
+EPISODES = 30
+MAX_STEPS = 1000
 
 Q_table = [[0.0 for _ in range(NUM_ACTIONS)] for _ in range(NUM_STATES)]
 
