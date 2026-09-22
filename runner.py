@@ -30,6 +30,11 @@ color_sensor.mode = 'COL-REFLECT'
 
 # Set default motor speeds for smooth control and sharp corner turns
 BASE_SPEED = 16
+ACTION_TIME = 0.06
+BLACK_MAX = 8
+WHITE_MIN = 28
+OBSTACLE_THRESHOLD = 20
+SEARCH_TIMEOUT = 6.0
 # Inner-wheel speed during a turn. At -BASE_SPEED the wheels counter-rotate, so a
 # turn is pure rotation with no forward creep - the robot holds its ground and
 # sweeps the sensor until it finds the edge. This is what lets a 90-degree corner
@@ -52,9 +57,9 @@ def get_current_state():
     """
     reflection = color_sensor.reflected_light_intensity
     
-    if reflection < 5:
+    if reflection < BLACK_MAX:
         return 0  # State 0: Outside Line (Black Background)
-    elif reflection <= 30:
+    elif reflection < WHITE_MIN:
         return 1  # State 1: On Edge of White Line (Target Zone)
     else:
         return 2  # State 2: Inside White Line (White Tape)
@@ -147,13 +152,24 @@ def avoid_obstacle_and_find_path():
     left_motor.on(SpeedPercent(15))
     right_motor.on(SpeedPercent(15))
     
-    # Keep driving until line edge (reflection between 8 and 25) is detected
-    while not (8 <= color_sensor.reflected_light_intensity <= 25):
+    # Search is bounded so the robot cannot drive away forever if the line is missed.
+    from time import time
+    deadline = time() + SEARCH_TIMEOUT
+    found = False
+    while time() < deadline:
+        reflection = color_sensor.reflected_light_intensity
+        if BLACK_MAX <= reflection < WHITE_MIN:
+            found = True
+            break
         sleep(0.05)
-        
+
     stop_motors()
-    print("[PATH FINDING] Path edge re-acquired! Resuming RL control.\n")
+    if found:
+        print("[PATH FINDING] Path edge re-acquired! Resuming RL control.\n")
+    else:
+        print("[PATH FINDING] Timed out. Reposition robot near the line.\n")
     sleep(0.5)
+    return found
 
 # ==========================================
 # 5. Q-Learning Initialization & Rewards
@@ -222,11 +238,14 @@ def get_reward(prev_state, action, next_state):
 
 def select_action(state):
     """Epsilon-greedy action selection."""
-    if random.uniform(0, 1) < epsilon:
-        return random.randint(0, NUM_ACTIONS - 1)  # Explore
-    else:
-        max_val = max(Q_table[state])
-        return Q_table[state].index(max_val)       # Exploit
+    if random.random() < epsilon:
+        return random.randrange(NUM_ACTIONS)
+
+    # Random tie-breaking prevents the initial all-zero table from always
+    # selecting action 0 (Forward).
+    max_val = max(Q_table[state])
+    best = [a for a, value in enumerate(Q_table[state]) if value == max_val]
+    return random.choice(best)
 
 def save_q_table():
     """Saves Q-table to JSON file for persistent trained performance."""
@@ -243,7 +262,11 @@ def load_q_table():
     if os.path.exists(Q_FILE):
         try:
             with open(Q_FILE, 'r') as f:
-                Q_table = json.load(f)
+                loaded = json.load(f)
+                if (not isinstance(loaded, list) or len(loaded) != NUM_STATES or
+                        any(not isinstance(row, list) or len(row) != NUM_ACTIONS for row in loaded)):
+                    raise ValueError('Q-table dimensions do not match current state/action space')
+                Q_table = [[float(v) for v in row] for row in loaded]
             print("Loaded pre-trained Q-table from {}".format(Q_FILE))
         except Exception as e:
             print("Could not load Q-table: {}".format(e))
@@ -272,7 +295,7 @@ if __name__ == '__main__':
                 break
                 
             # 1. Non-RL Obstacle Avoidance Override (IR Proximity < 20)
-            if check_for_obstacles() < 20:
+            if check_for_obstacles() < OBSTACLE_THRESHOLD:
                 avoid_obstacle_and_find_path()
                 current_state = get_current_state()
                 continue
@@ -284,7 +307,9 @@ if __name__ == '__main__':
             # Action execution duration. At 0.12s a single turn swept the sensor
             # ~1.2cm - wider than the tape, so corrections overshot the edge and
             # the robot hunted. 0.05s gives ~0.5cm per step: sub-tape resolution.
-            sleep(0.05)
+            sleep(ACTION_TIME)
+            stop_motors()
+            sleep(0.01)
             
             # Observe environment transition
             next_state = get_current_state()
