@@ -31,9 +31,9 @@ color_sensor.mode = 'COL-REFLECT'
 # Set default motor speeds for smooth control and sharp corner turns
 BASE_SPEED = 16
 ACTION_TIME = 0.06
-BLACK_MAX = 8
-WHITE_MIN = 28
-OBSTACLE_THRESHOLD = 20
+BLACK_MAX = 6
+WHITE_MIN = 40
+OBSTACLE_THRESHOLD = 22
 SEARCH_TIMEOUT = 6.0
 # Inner-wheel speed during a turn. At -BASE_SPEED the wheels counter-rotate, so a
 # turn is pure rotation with no forward creep - the robot holds its ground and
@@ -189,7 +189,7 @@ Q_table = [[0.0 for _ in range(NUM_ACTIONS)] for _ in range(NUM_STATES)]
 # Hyperparameters
 alpha = 0.45    # Learning rate
 gamma = 0.9     # Discount factor
-epsilon = 0.12  # Exploration rate 0.12 to learn, 0 to exploit
+epsilon = 0.30  # Exploration rate 0.12 to learn, 0 to exploit
 
 
 def get_reward(prev_state, action, next_state):
